@@ -1,0 +1,904 @@
+/*
+    TemplateCreator: create stimulus templates for HEKA Patchmaster
+
+    Author: Christoph Kirst (ckirst@nld.ds.mpg.de)
+    Date:   2012, LMU Munich
+*/
+
+
+#include "mainwindow.h"
+#include "ui_mainwindow.h"
+
+#include <QFileDialog>
+#include <QtGui>
+#include <QSettings>
+#include <QMessageBox>
+
+#include <fstream>
+#include <deque>
+#include <math.h>
+//#include <fftw3.h>
+
+#include <iostream>
+
+
+#include <gsl/gsl_errno.h>
+#include <gsl/gsl_fft_complex.h>
+
+#define REAL(z,i) ((z)[2*(i)])
+#define IMAG(z,i) ((z)[2*(i)+1])
+
+#define DEBUG(msg) std::cout << msg << std::endl; std::cout.flush();
+//#define DEBUG(msg)
+
+// code for gui
+
+MainWindow::MainWindow(QWidget *parent) :
+    QMainWindow(parent),
+    ui(new Ui::MainWindow)
+{
+    ui->setupUi(this);
+
+    addDockWidget(Qt::BottomDockWidgetArea, ui->creatorDockWidget);
+    addDockWidget(Qt::BottomDockWidgetArea, ui->tplDockWidget);
+    addDockWidget(Qt::TopDockWidgetArea, ui->viewDockWidget);
+
+
+    ui->menuView->addAction(ui->tplDockWidget->toggleViewAction());
+    ui->menuView->addAction(ui->creatorDockWidget->toggleViewAction());
+    ui->menuView->addAction(ui->viewDockWidget->toggleViewAction());
+
+    graphWidget = new QCustomPlot();
+    ui->graphLayout->addWidget(graphWidget, 0, 0, 1, 1);
+
+
+    //configure graphics
+    graphWidget->addGraph();
+
+    // configure right and top axis to show ticks but no labels (could've also just called graphWidget->setupFullAxesBox):
+    graphWidget->xAxis2->setVisible(true);
+    graphWidget->xAxis2->setTickLabels(false);
+    graphWidget->yAxis2->setVisible(true);
+    graphWidget->yAxis2->setTickLabels(false);
+
+    // make left and bottom axes always transfer their ranges to right and top axes:
+    connect(graphWidget->xAxis, SIGNAL(rangeChanged(QCPRange)), graphWidget->xAxis2, SLOT(setRange(QCPRange)));
+    connect(graphWidget->yAxis, SIGNAL(rangeChanged(QCPRange)), graphWidget->yAxis2, SLOT(setRange(QCPRange)));
+
+    output = 1;
+
+    DEBUG("init done!")
+}
+
+MainWindow::~MainWindow()
+{
+    writeSettings();
+
+    delete ui;
+}
+
+void MainWindow::on_actionExit_triggered()
+{
+    close();
+}
+
+void MainWindow::on_actionCreator_triggered()
+{
+    ui->creatorDockWidget->toggleViewAction();
+}
+
+void MainWindow::on_actionViewer_triggered()
+{
+    ui->viewDockWidget->toggleViewAction();
+}
+
+void MainWindow::on_actionAbout_Template_Creaor_triggered()
+{
+    QMessageBox msgBox;
+    msgBox.setText("The awsome Template Creator by Christoph Kirst\nckirst@nld.ds.mpg.de");
+    msgBox.setWindowTitle("Info");
+    //msgBox.setIcon();
+    msgBox.exec();
+}
+
+
+int MainWindow::index() {
+    int id = ui->tabWidget->currentIndex();
+    if (id>NTABS-1 || id <0) {
+        id = 0;
+    }
+    return id;
+}
+
+
+
+void MainWindow::on_browseButton_clicked()
+{
+    //QFileDialog::setFileMode(QFileDialog::AnyFile);
+    QString newfile = QFileDialog::getSaveFileName(this,
+                                                   tr("Select Template File"), tpl_fileName[index()], tr("Template File (*.tpl);;All (*.*)"));
+    if (newfile != "") {
+
+        // change active fileName
+        tpl_fileName[index()] = newfile;
+
+        ui->filename_Edit->setText(newfile);
+        on_saveopenButton_clicked();
+    }
+}
+
+
+void MainWindow::on_saveopenButton_clicked()
+{
+    createData();
+
+    QString fileName = ui->filename_Edit->text();
+    bool res = write_template_file(fileName);
+
+    if (res)
+        ui->statusBar->showMessage("Saved Template to " + fileName, 2000 );
+    else
+        ui->statusBar->showMessage("Could not save Template to " + fileName, 2000 );
+
+    plotData();
+}
+
+void MainWindow::on_loadButton_clicked()
+{
+    //try to read data
+    QString fileName = ui->filename_Edit->text();
+
+    if (read_template_file(fileName)) {
+        plotData();
+    } else {
+        QMessageBox msgBox;
+        msgBox.setText("Cannot load file: " + fileName);
+        msgBox.exec();
+    }
+}
+
+
+
+
+
+void MainWindow::createData() {
+    // create data
+
+    DEBUG("create data")
+
+    int id = index();
+
+    if (id==0) {
+        createZap();
+    } else { //id == 1
+        createNoise();
+    }
+
+    DEBUG("create data")
+
+    updateTemplateInfo();
+}
+
+bool MainWindow::createZap() {
+    DEBUG("create zap")
+    bool zap = create_zap(ui-> dur_SpinBox->value(),  ui->sample_SpinBox->value(),
+                          ui->f0_SpinBox->value(), ui->f1_SpinBox->value(), ui->amp_SpinBox->value(), ui->reverseCheckBox->isChecked(),
+                          data);
+
+    DEBUG("create zap")
+
+    postprocess_template(ui->sample_SpinBox->value(), ui->off_SpinBox->value(), ui->left_SpinBox->value(), ui->right_SpinBox->value(),
+                         data);
+
+    if (zap)
+        ui->statusBar->showMessage("Zap created", 2000 );
+    else
+        ui->statusBar->showMessage("Could not create Zap!", 2000 );
+
+    plotData();
+    updateTemplateInfo();
+
+    return zap;
+}
+
+
+bool MainWindow::createNoise() {
+    bool noise = create_noise(ui->dur_SpinBox->value(), ui->sample_SpinBox->value(),
+                     ui->omega_SpinBox_2->value(), ui->phase_SpinBox_2->value(), ui->amp_SpinBox_2->value(),
+                     ui->f0_SpinBox_2->value(), ui->f1_SpinBox_2->value(), ui->sigma_SpinBox_2->value(), ui->seed_SpinBox_2->value(),
+                     data);
+
+    postprocess_template(ui->sample_SpinBox->value(), ui->off_SpinBox->value(), ui->left_SpinBox->value(), ui->right_SpinBox->value(),
+                         data);
+
+    if (noise) {
+        ui->statusBar->showMessage("Noise created", 2000 );
+    } else {
+        ui->statusBar->showMessage("Could not create Noise!", 2000 );
+    }
+
+    plotData();
+    updateTemplateInfo();
+
+    return noise;
+}
+
+
+void MainWindow::updateTemplateInfo() {
+    double dt = 1 / tpl_sample[index()] / 1000;
+    double length = tpl_dur[index()] + tpl_left[index()] + tpl_right[index()];
+    int points = ceil(length /dt);
+    ui->info_label->setText(QString("length = %1 s, dt = %2 s, points = %3").arg(length).arg(dt).arg(points));
+}
+
+// general template parameter
+void MainWindow::on_dur_SpinBox_editingFinished()
+{
+    tpl_dur[index()] = ui->dur_SpinBox->value();
+    createData();
+}
+
+void MainWindow::on_off_SpinBox_editingFinished()
+{
+    tpl_off[index()] = ui->off_SpinBox->value();
+    createData();
+}
+
+void MainWindow::on_left_SpinBox_editingFinished()
+{
+    tpl_left[index()] = ui->left_SpinBox->value();
+    createData();
+}
+
+void MainWindow::on_right_SpinBox_editingFinished()
+{
+    tpl_right[index()] = ui->right_SpinBox->value();
+    createData();
+}
+
+void MainWindow::on_sample_SpinBox_editingFinished()
+{
+    tpl_sample[index()] = ui->sample_SpinBox->value();
+    createData();
+}
+
+void MainWindow::on_filename_Edit_editingFinished()
+{
+    // change active fileName
+    tpl_fileName[index()] = ui->filename_Edit->text();
+}
+
+
+
+//zap parameter editing
+void MainWindow::on_createButton_clicked()
+{
+    createZap();
+}
+
+void MainWindow::on_f0_SpinBox_editingFinished()
+{
+    createZap();
+}
+
+void MainWindow::on_f1_SpinBox_editingFinished()
+{
+    createZap();
+}
+
+void MainWindow::on_amp_SpinBox_editingFinished()
+{
+    createZap();
+}
+
+void MainWindow::on_reverseCheckBox_clicked()
+{
+    createZap();
+}
+
+
+//LPFnoise
+void MainWindow::on_createButton_2_clicked()
+{
+    createNoise();
+}
+
+void MainWindow::on_omega_SpinBox_2_editingFinished()
+{
+    createNoise();
+}
+
+void MainWindow::on_phase_SpinBox_2_editingFinished()
+{
+    createNoise();
+}
+
+void MainWindow::on_amp_SpinBox_2_editingFinished()
+{
+    createNoise();
+}
+
+void MainWindow::on_f0_SpinBox_2_editingFinished()
+{
+    createNoise();
+}
+
+void MainWindow::on_f1_SpinBox_2_editingFinished()
+{
+    createNoise();
+}
+
+void MainWindow::on_sigma_SpinBox_2_editingFinished()
+{
+    createNoise();
+}
+
+void MainWindow::on_seed_SpinBox_2_editingFinished()
+{
+    createNoise();
+}
+
+void MainWindow::on_tabWidget_currentChanged(int id)
+{
+    if (id<0 || id >NTABS-1) id = 0;
+    //int id = index();
+    ui->statusBar->showMessage(QString("index is %1").arg(id), 2000 );
+
+    ui->dur_SpinBox->setValue(tpl_dur[id]);
+    ui->sample_SpinBox->setValue(tpl_sample[id]);
+    ui->off_SpinBox->setValue(tpl_off[id]);
+    ui->left_SpinBox->setValue(tpl_left[id]);
+    ui->right_SpinBox->setValue(tpl_right[id]);
+    ui->filename_Edit->setText(tpl_fileName[id]);
+
+    createData();
+}
+
+
+
+
+// a simple plotting routine
+
+void MainWindow::plotData()
+{
+    DEBUG("plotData")
+
+    // reduce data
+    //graphWidget->width();
+    int plotpoints = data.size() < 2000 ?  data.size() : 2000;
+    double dindex = double(data.size()) / plotpoints;
+    double index= 0;
+    double dt = 1.0 / ui->sample_SpinBox->value() / 1000.0;
+
+    int n = floor(double(data.size()) / dindex);
+
+    x.resize(n);
+    y.resize(n);
+
+    for (int i = 0; i < n; i++) {
+        x[i] = floor(index) * dt;
+        y[i] = data[int(floor(index))];
+        index += dindex;
+    }
+
+    // add two new graphs and set their look:
+    graphWidget->graph(0)->setPen(QPen(Qt::blue)); // line color blue for first graph
+    //graphWidget->graph(0)->setBrush(QBrush(QColor(0, 0, 255, 20))); // first graph will be filled with translucent blue
+
+    // pass data points to graphs:
+    graphWidget->graph(0)->setData(x, y);
+
+    // let the ranges scale themselves so graph 0 fits perfectly in the visible area:
+    graphWidget->graph(0)->rescaleAxes();
+
+    // make range moveable by mouse interaction (click and drag):
+    graphWidget->setRangeDrag(Qt::Horizontal | Qt::Vertical);
+    graphWidget->setRangeZoom(Qt::Horizontal | Qt::Vertical);
+    graphWidget->setInteraction(QCustomPlot::iSelectPlottables); // allow selection of graphs via mouse click
+
+    graphWidget->replot();
+
+    DEBUG("plotData!")
+}
+
+
+
+void MainWindow::writeTemplateSettings(QSettings& settings, int id)
+{
+    settings.setValue("dur", tpl_dur[id]);
+    settings.setValue("sample", tpl_sample[id]);
+    settings.setValue("off", tpl_off[id]);
+    settings.setValue("left", tpl_left[id]);
+    settings.setValue("right", tpl_right[id]);
+    settings.setValue("file", tpl_fileName[id]);
+
+}
+
+void MainWindow::readTemplateSettings(QSettings& settings, int id, double dur, double sample, double off, double left, double right, QString filename)
+{
+    tpl_dur[id] = settings.value("dur", dur).toDouble();
+    tpl_sample[id] = settings.value("sample", sample).toDouble();
+    tpl_off[id] = settings.value("off", off).toDouble();
+    tpl_left[id] = settings.value("left", left).toDouble();
+    tpl_right[id] = settings.value("right", right).toDouble();
+    tpl_fileName[id] = settings.value("file", filename).toString();
+}
+
+void MainWindow::writeSettings()
+{
+    DEBUG("writeSettings")
+
+    QSettings settings("CKSoftware", "TemplateCreator");
+
+    settings.beginGroup("MainWindow");
+    settings.setValue("size", size());
+    settings.setValue("pos", pos());
+    settings.setValue("tab", index());
+    settings.endGroup();
+
+    settings.beginGroup("ZapParameter");
+    writeTemplateSettings(settings, 0);
+    settings.setValue("f0", ui->f0_SpinBox->value());
+    settings.setValue("f1", ui->f1_SpinBox->value());
+    settings.setValue("amp", ui->amp_SpinBox->value());
+    settings.setValue("reverse", ui->reverseCheckBox->isChecked());
+    settings.endGroup();
+
+    settings.beginGroup("LFPNoiseParameter");
+    writeTemplateSettings(settings, 1);
+    settings.setValue("f", ui->omega_SpinBox_2->value());
+    settings.setValue("phase", ui->phase_SpinBox_2->value());
+    settings.setValue("amp", ui->amp_SpinBox_2->value());
+    settings.setValue("f0", ui->f0_SpinBox->value());
+    settings.setValue("f1", ui->f1_SpinBox->value());
+    settings.setValue("sigma", ui->sigma_SpinBox_2->value());
+    settings.setValue("seed", ui->seed_SpinBox_2->value());
+    settings.endGroup();
+}
+
+void MainWindow::readSettings()
+{
+    QSettings settings("CKSoftware", "TemplateCreator");
+
+    settings.beginGroup("MainWindow");
+    resize(settings.value("size", QSize(400, 400)).toSize());
+    move(settings.value("pos", QPoint(200, 200)).toPoint());
+    ui->tabWidget->setCurrentIndex(settings.value("tab", 0).toInt());
+    settings.endGroup();
+
+    settings.beginGroup("ZapParameter");
+    readTemplateSettings(settings, 0, 30, 20, 0, 0, 0, "C:\\zap.tmp");
+    ui->f0_SpinBox->setValue(settings.value("f0", 0.0).toDouble());
+    ui->f1_SpinBox->setValue(settings.value("f1", 50.0).toDouble());
+    ui->amp_SpinBox->setValue(settings.value("amp", 1.0).toDouble());
+    ui->reverseCheckBox->setChecked(settings.value("reverse", false).toBool());
+    settings.endGroup();
+
+    settings.beginGroup("LFPNoiseParameter");
+    readTemplateSettings(settings, 1, 10, 20, 0,0,0,"C:\\lfp_noise.tmp");
+    ui->omega_SpinBox_2->setValue(settings.value("f", 0.0).toDouble());
+    ui->phase_SpinBox_2->setValue(settings.value("phase", 0.0).toDouble());
+    ui->amp_SpinBox_2->setValue(settings.value("amp", 0.0).toDouble());
+    ui->f0_SpinBox_2->setValue(settings.value("f0", 0).toDouble());
+    ui->f1_SpinBox_2->setValue(settings.value("f1", 30).toDouble());
+    ui->sigma_SpinBox_2->setValue(settings.value("sigma", 1).toDouble());
+    ui->seed_SpinBox_2->setValue(settings.value("seed", 0).toInt());
+    settings.endGroup();
+
+    on_tabWidget_currentChanged(index());
+}
+
+
+
+
+
+
+
+
+// main code
+
+
+//read write template files
+
+bool MainWindow::read_template_file(const QString& fname) {
+
+   /* open file as binary */
+
+   std::fstream file;
+   file.open( fname.toStdString().c_str(), std::ios::in | std::ios::binary );
+
+   if (!file.good()) return false;
+
+   std::streampos pos = file.tellg();
+   file.seekg(0, std::ios_base::end);
+   std::streampos end = file.tellg();
+   file.seekg(pos, std::ios_base::beg);
+   int data_size = (end-pos)/sizeof(templateTYPE);
+
+   //data.resize(size);
+   data.resize(data_size);
+   file.read((char *) & data[0] , data_size*sizeof(templateTYPE));
+   file.close();
+
+   return true;
+}
+
+
+
+bool MainWindow::write_template_file(const QString& fname) {
+
+   /* open file as binary */
+   std::fstream file;
+   file.open( fname.toStdString().c_str(), std::ios::out | std::ios::binary );
+   if (!file.good()) return false;
+
+   DEBUG("wrtinig data")
+
+
+   /* write data */
+   file.write( (char *) &data[0], data.size() * sizeof(templateTYPE) );
+
+   file.close();
+
+   return true;
+}
+
+//standard manipulations: setting offset and left and right margins
+void MainWindow::postprocess_template(templateTYPE samp, templateTYPE off, templateTYPE left, templateTYPE right,
+                                      std::vector<templateTYPE>& v) {
+
+    templateTYPE dt = 1.0 /samp / 1000.0;
+
+    // add offsets
+    for (int i =0; i < v.size(); i++) {
+        v[i] += off;
+    }
+
+    //add left and right margins
+    if (left<= 0 && right <= 0) return;
+
+    //resize:
+    int nl = int(left / dt);
+    int nr = int(right / dt);
+    int n = v.size() + nl + nr;
+
+    templateTYPE * vnew = new templateTYPE[n];
+    for (int i = 0; i < nl; i++) { vnew[i] = off; }
+    copy ( v.begin(), v.end(), vnew + nl);
+    for (int i = v.size()+nl; i < n; i++) { vnew[i] = off; }
+
+    v.resize(n);
+    copy(vnew, vnew+n, v.begin());
+
+    delete [] vnew;
+}
+
+
+
+
+/* create a zap stimulus of duration dur [sec], starting from freq f0 to f1 [Hz] with amplitude amp, and constant offset off, add constant stimulation of length left and right
+ * assume sampling frequency of samp [kHz]
+ */
+bool MainWindow::create_zap(templateTYPE dur, templateTYPE samp,
+                            templateTYPE f0, templateTYPE f1, templateTYPE amp, bool reverse,
+                            std::vector<templateTYPE>& v ) {
+
+   /* zap stim is given by  sin(t ((f1-f0) t/dur + f0) */
+   /* here time is measured in secs */
+
+   /* for sampling rate of samp kHz we have a dt = 1/samp / 1000 */
+
+
+   templateTYPE dt = 1.0 / samp / 1000.0;
+   int n = int(dur * samp * 1000) + 1;
+
+   v.resize(n);
+   templateTYPE t = 0;
+   for (int i = 0; i < n; i++) {
+       if (reverse)
+            //v.push_back( amp * sin((dur - t) * ((f1-f0) * (dur -t) / dur + f0)) );
+           v[i] = amp * sin((dur - t) * ((f1-f0) * (dur -t) / dur + f0));
+       else
+            //v.push_back( amp * sin(t * ((f1-f0) * (t / dur + f0))) );
+           v[i] = amp * sin(t * ((f1-f0) * (t / dur + f0))) ;
+
+       //DEBUG(v[i])
+      t+=dt;
+   }
+
+   return true;
+}
+
+
+
+/* create a noise stimulus of duration dur [sec] with uniform frequency spectrum from f0 to f1 [Hz] with standard deviation sigma add constant stimulation offset off
+ * add LFP like signal underneath with amplitude amp / phase and freqeuncy omega [Hz]
+ * assume sampling frequency of samp [kHz]
+ */
+bool MainWindow::create_noise(templateTYPE dur, templateTYPE samp,
+                              templateTYPE ff,  templateTYPE phase, templateTYPE amp,
+                              templateTYPE f0, templateTYPE f1, templateTYPE sigma, int seed,
+                              std::vector<templateTYPE>& v) {
+
+    //working gsl fft version -> slow under windows
+   DEBUG("create_noise")
+
+   srand(seed);
+
+   templateTYPE dt = 1.0 /samp / 1000.0;
+   int n = ceil(dur/dt);
+   if (n<1) n=1;
+   int n2 = floor(n/2);
+   DEBUG(QString("n=%1, n2=%2").arg(n).arg(n2).toStdString())
+
+
+   gsl_fft_complex_wavetable * wavetable;
+   gsl_fft_complex_workspace * workspace;
+
+   double * fft = new double[2*n]; //for strange resons fft[2*n] gives seg fault for large n;
+   double rphase;
+
+   DEBUG("array creation done!")
+
+   fft[0] = 0.0;
+   fft[1] = 0.0;
+
+   DEBUG("filling fft")
+
+   for (int i= 1; i < n2; i++) {
+       double f = double(i)/dur;
+       if (f0 <= f && f <= f1) {
+           rphase  = double(rand())/double(RAND_MAX) * 2*3.141592653589793;
+           //rphase = 10;
+           REAL(fft,i) = cos(rphase);
+           IMAG(fft,i) = sin(rphase);
+       } else {
+           REAL(fft,i) = 0.0;
+           IMAG(fft,i) = 0.0;
+       }
+
+       //complex conjugates
+       REAL(fft, n-i) = REAL(fft, i);
+       IMAG(fft, n-i) = - IMAG(fft, i);
+   }
+
+   DEBUG("fft filled!")
+
+   wavetable = gsl_fft_complex_wavetable_alloc (n);
+   workspace = gsl_fft_complex_workspace_alloc (n);
+
+   gsl_fft_complex_inverse(fft, 1, n, wavetable, workspace);
+
+   DEBUG("fft done!")
+
+   v.resize(n);
+   for (int i= 0; i < n; i++) {
+       v[i]= REAL(fft,i);
+   }
+
+
+   //normalize standard deviation to sigma
+   double var = 0;
+   double mean = 0;
+   for (int i= 0; i < n; i++) {
+       var += v[i]*v[i];
+       mean += v[i];
+   }
+   var = var/n;
+   mean= mean/n; //mean should be zero by construction
+   var = var - mean*mean;
+
+   double fac = sigma/sqrt(var);
+
+   // add sine wave
+   for (int i = 0; i < n; i++) {
+      v[i] = fac*(v[i]-mean) + amp * sin(2*3.141592653589793*ff*i*dt+phase);
+   }
+
+   gsl_fft_complex_wavetable_free (wavetable);
+   gsl_fft_complex_workspace_free (workspace);
+   delete [] fft;
+
+   return true;
+
+
+
+
+   // workingt fftw version
+
+/*
+   srand(seed);
+
+   templateTYPE dt = 1.0 /samp / 1000.0;
+   int n = ceil(dur/dt);
+   if (n<1) n=1;
+   int n2 = floor(n/2);
+
+   fftw_complex *in, *out;
+   fftw_plan p;
+
+
+   in = (fftw_complex*) malloc(sizeof(fftw_complex) * n);
+   out = (fftw_complex*) malloc(sizeof(fftw_complex) * n);
+   double rphase;
+
+
+   //we take no constant offset
+   in[0][0] = 0; in[0][1] = 0;
+
+    for (int i= 1; i < n2; i++) {
+        double f = double(i)/dur;
+        if (f0 <= f && f <= f1) {
+            rphase  = double(rand())/double(RAND_MAX) * 2*3.141592653589793;
+            in[i][0] = cos(rphase);
+            in[i][1] = sin(rphase);
+        } else {
+            in[i][0] = 0.0;
+            in[i][1] = 0.0;
+        }
+
+        //complex conjugates
+        in[n-i][0] = in[i][0];
+        in[n-i][1] = -in[i][1];
+    }
+
+
+
+    p = fftw_plan_dft_1d(n, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_execute(p);
+
+
+    v.resize(n);
+    for (int i= 0; i <n; i++) {
+        v[i]=out[i][0];
+    }
+
+    fftw_destroy_plan(p);
+    fftw_free(in); fftw_free(out);
+
+
+    //normalize standard deviation to sigma
+    double var = 0;
+    double mean = 0;
+    for (int i= 0; i < n; i++) {
+        var += v[i]*v[i];
+        mean += v[i];
+    }
+    var = var/n;
+    mean= mean/n; //mean should be zero by construction
+    var = var - mean*mean;
+
+    double fac = sigma/sqrt(var);
+
+    // add sine wave
+    for (int i = 0; i < n; i++) {
+       v[i] = fac*(v[i]-mean) + amp * sin(2*3.141592653589793*ff*i*dt+phase);
+    }
+
+   return true;
+
+   */
+}
+
+
+/*
+// own FFT as gsl fft seems to be very slow
+// bit reversal
+ComplexNumber[] data = new ComplexNumber[length];
+for (int i = 0; i < x.Length; i++)
+{
+    int j = ReverseBits(i, bitsInLength);
+    data[j] = new ComplexNumber(x[i]);
+}
+
+// Cooley-Tukey
+for (int i = 0; i < bitsInLength; i++)
+{
+    int m = 1 << i;
+    int n = m * 2;
+    double alpha = -(2 * Math.PI / n);
+
+    for (int k = 0; k < m; k++)
+    {
+        // e^(-2*pi/N*k)
+        ComplexNumber oddPartMultiplier =
+           new ComplexNumber(0, alpha * k).PoweredE();
+
+        for (int j = k; j < length; j += n)
+        {
+            ComplexNumber evenPart = data[j];
+            ComplexNumber oddPart = oddPartMultiplier * data[j + m];
+            data[j] = evenPart + oddPart;
+            data[j + m] = evenPart - oddPart;
+        }
+    }
+}
+
+
+
+*/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* test HEKA patch master interface */
+
+
+void MainWindow::on_writeButton_clicked()
+{
+
+    QString fname = ui->lineEdit_In->text();
+
+
+    // compose ouput text
+
+    QString text = ui->textIn->toPlainText();
+
+    text = QString("%1\n%2").arg(output).arg(text);
+    output++;
+
+    std::fstream file;
+    file.open( fname.toStdString().c_str(), std::ios::out );
+    file.write ( text.toStdString().c_str() , text.size() );
+    file.close();
+
+    ui->statusBar->showMessage("Wrote: " + fname, 2000 );
+
+}
+
+
+
+void MainWindow::on_readButton_clicked()
+{
+    QString fname = ui->lineEdit_Out->text();
+
+    // try to open
+
+    std::fstream file;
+    file.open( fname.toStdString().c_str(), std::ios::in );
+
+    if (!file.good() || !file.is_open()) {
+        ui->statusBar->showMessage("Cannot open " + fname, 2000 );
+        return;
+    }
+
+    std::string text = "";
+    std::string line;
+
+    while ( file.good() ) {
+        getline (file,line);
+        text = text + line  + "\n";
+    }
+
+    file.close();
+
+    ui->textOut->setPlainText(QString(text.c_str()));
+
+    ui->statusBar->showMessage("Read: " + fname, 2000 );
+}
