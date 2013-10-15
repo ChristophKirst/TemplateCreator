@@ -2000,6 +2000,8 @@ void MainWindow::on_sin_positive_checkBox_clicked()
 }
 
 
+
+
 void MainWindow::on_zap_sqr_radioButton_clicked()
 {
     update();
