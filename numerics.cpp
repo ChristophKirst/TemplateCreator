@@ -80,18 +80,19 @@ bool create_zap(DataTYPE dur, DataTYPE samp,
    DataTYPE dt = 1.0 / samp / 1000.0;
    int n = int(dur * samp * 1000) + 1;
 
+
    DataTYPE ph0 = 0;
    if (reverse) {
-      ph0 = 2 * pi * (dur) * ((f1-f0) / 2.0 + f0);
+      //ph0 = 2 * pi * (dur) * ((f1-f0) / 2.0 + f0);
+      ph0 = -dur * pi * (f0 + f1); // this adjust phase to get zero at end of zap !
    }
-
-
 
    v.resize(n);
    DataTYPE t = 0;
    for (int i = 0; i < n; i++) {
        if (reverse)
-           v[i] = amp * sin(2 * pi * (dur - t) * ((f1-f0) * (dur -t) / dur / 2.0 + f0) + ph0);
+           //v[i] = amp * sin(2 * pi * (dur - t) * ((f1-f0) * (dur -t) / dur / 2.0 + f0) + ph0); //old
+           v[i] = amp * sin(2 * pi * t / (2 * dur) * (t * f0 +(2 * dur - t)* f1) + ph0 + pi);
        else
            v[i] = amp * sin(2 * pi * t * ((f1-f0) * (t / dur)/2.0 + f0));
        t+=dt;
@@ -99,6 +100,84 @@ bool create_zap(DataTYPE dur, DataTYPE samp,
 
    return true;
 }
+
+
+
+/* create a zap stimulus of duration dur [sec], starting from freq f0 to f1 [Hz] increasing with t^2 with amplitude amp, and constant offset off, add constant stimulation of length left and right
+ * assume sampling frequency of samp [kHz]
+ */
+bool create_zap_2(DataTYPE dur, DataTYPE samp,
+                            DataTYPE f0, DataTYPE f1, DataTYPE amp, bool reverse,
+                            DataVECTOR& v ) {
+
+   /* zap stim is given by  sin(t ((f1-f0) t/dur + f0)) */
+   /* here time is measured in secs */
+
+   /* for sampling rate of samp kHz we have a dt = 1/samp / 1000 */
+
+
+   DataTYPE dt = 1.0 / samp / 1000.0;
+   int n = int(dur * samp * 1000) + 1;
+
+   DataTYPE ph0 = 0;
+   if (reverse) {
+      ph0 = -2 * pi /3 * dur * (2 * f0 + f1);
+   }
+
+   v.resize(n);
+   DataTYPE t = 0;
+   for (int i = 0; i < n; i++) {
+       if (reverse)
+           v[i] = amp * sin(2 * pi * t /(3 * dur * dur) * ((3 * dur - t) * t * f0  + (3 * dur * dur - 3 * dur * t + t*t) * f1)+ ph0 + pi);
+       else
+           v[i] = amp * sin(2 * pi * ((f1-f0) * pow(t,3) / (3 * dur * dur) + t * f0 ));
+       t+=dt;
+   }
+
+   return true;
+}
+
+
+
+/* create a zap stimulus of duration dur [sec], starting from freq f0 to f1 [Hz] increasing exponentially, with amplitude amp, and constant offset off, add constant stimulation of length left and right
+ * assume sampling frequency of samp [kHz]
+ */
+bool create_zap_exp(DataTYPE dur, DataTYPE samp,
+                            DataTYPE f0, DataTYPE f1, DataTYPE amp, bool reverse,
+                            DataVECTOR& v ) {
+
+   /* zap stim is given by  sin(t ((f1-f0) t/dur + f0)) */
+   /* here time is measured in secs */
+
+   /* for sampling rate of samp kHz we have a dt = 1/samp / 1000 */
+
+
+   DataTYPE dt = 1.0 / samp / 1000.0;
+   int n = int(dur * samp * 1000) + 1;
+
+   DataTYPE ph0 = 0;
+   if (reverse) {
+       ph0 = -2 * pi /(exp(1)-1) * dur * (f0 + (exp(1)-2) * f1);
+   }
+
+
+   v.resize(n);
+   DataTYPE t = 0;
+   for (int i = 0; i < n; i++) {
+       if (reverse)
+           v[i] = amp * sin(2 * pi * (t*f0 + (dur * exp(1) * (1-exp(-t/dur))-t)*(f1-f0)/(exp(1) -1))+ph0 + pi);
+       else
+           v[i] = amp * sin(2 * pi * ((dur * (exp(t/dur)-1)-t)*(f1-f0) / (exp(1)-1) + t * f0));
+       t+=dt;
+   }
+
+   return true;
+}
+
+
+
+
+
 
 
 

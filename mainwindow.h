@@ -250,6 +250,12 @@ private slots:
 
     void on_noiselist_pushButton_clicked();
 
+    void on_zap_sqr_radioButton_clicked();
+
+    void on_zap_exp_radioButton_clicked();
+
+    void on_zap_lin_radioButton_clicked();
+
 private:
     Ui::MainWindow *ui;
     QCustomPlot * graphWidget;

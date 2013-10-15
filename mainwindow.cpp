@@ -320,6 +320,11 @@ void MainWindow::setupParameter() {
     p.parameter.push_back(Parameter("off", 0.0, 0.0, Parameter::Double, ui->off_SpinBox));
     p.parameter.push_back(Parameter("left", 0.0, 0.0, Parameter::Double, ui->left_SpinBox));
     p.parameter.push_back(Parameter("right", 0.0, 0.0, Parameter::Double, ui->right_SpinBox));
+    QVector<QRadioButton*> * rdbuttons = new QVector<QRadioButton*>();
+    rdbuttons->push_back(ui->zap_lin_radioButton);
+    rdbuttons->push_back(ui->zap_sqr_radioButton);
+    rdbuttons->push_back(ui->zap_exp_radioButton);
+    p.parameter.push_back(Parameter("type", 0, 0, Parameter::Set, (QWidget*) rdbuttons));
     p.parameter.push_back(Parameter("file", "C:\\zap.tpl", "C:\\zap.tpl", Parameter::String,  ui->filename_Edit));
 
     parameter.push_back(p);
@@ -404,7 +409,7 @@ void MainWindow::setupParameter() {
     p.name = "HEKA Resonance";
     p.parameter.push_back(Parameter("sequence", "zap", "zap", Parameter::String, ui->resonanceSequence_lineEdit));
     p.parameter.push_back(Parameter("template", "zap", "zap", Parameter::String, ui->resonanceTemplate_lineEdit));
-    QVector<QRadioButton*> * rdbuttons = new QVector<QRadioButton*>();
+    rdbuttons = new QVector<QRadioButton*>();
     rdbuttons->push_back(ui->resonanceLoad_radioButton);
     rdbuttons->push_back(ui->resonanceZap_radioButton);
     p.parameter.push_back(Parameter("load", 0, 0, Parameter::Set, (QWidget*) rdbuttons));
@@ -1012,10 +1017,26 @@ void MainWindow::createData() {
 bool MainWindow::createZap() {
     DEBUG("create zap")
 
-    bool suc = create_zap( parameter[ZapTab]["dur"].value.toDouble(),  parameter[ZapTab]["sample"].value.toDouble(),
+    int type = parameter[ZapTab]["type"].value.toInt();
+
+    bool suc;
+    if (type == 0) { // linear zap
+        suc = create_zap( parameter[ZapTab]["dur"].value.toDouble(),  parameter[ZapTab]["sample"].value.toDouble(),
                            parameter[ZapTab]["f0"].value.toDouble(),  parameter[ZapTab]["f1"].value.toDouble(),
                            parameter[ZapTab]["amp"].value.toDouble(),  parameter[ZapTab]["reverse"].value.toBool(),
                            data );
+
+    } else if (type == 1) { // t^2 zap
+        suc = create_zap_2( parameter[ZapTab]["dur"].value.toDouble(),  parameter[ZapTab]["sample"].value.toDouble(),
+                               parameter[ZapTab]["f0"].value.toDouble(),  parameter[ZapTab]["f1"].value.toDouble(),
+                               parameter[ZapTab]["amp"].value.toDouble(),  parameter[ZapTab]["reverse"].value.toBool(),
+                               data );
+    } else { // exp zap
+        suc = create_zap_exp( parameter[ZapTab]["dur"].value.toDouble(),  parameter[ZapTab]["sample"].value.toDouble(),
+                               parameter[ZapTab]["f0"].value.toDouble(),  parameter[ZapTab]["f1"].value.toDouble(),
+                               parameter[ZapTab]["amp"].value.toDouble(),  parameter[ZapTab]["reverse"].value.toBool(),
+                               data );
+    }
 
     postprocess_template( parameter[ZapTab]["sample"].value.toDouble(), parameter[ZapTab]["off"].value.toDouble(),
                           parameter[ZapTab]["left"].value.toDouble(), parameter[ZapTab]["right"].value.toDouble(),
@@ -1216,9 +1237,9 @@ void MainWindow::updateHEKABatchId(){
 
 
 void MainWindow::zap_parameter_to_comment(QString& comment) {
-    //we only need the first 9 parameters really !
+    //we only need the first 10 parameters really !
     QString c("Zap");
-    for (int i = 0; i < 9; i++) {
+    for (int i = 0; i < 10; i++) {
         c = QString("%1; %2").arg(c).arg(parameter[ZapTab].parameter[i].toString());
     }
 
@@ -1227,7 +1248,7 @@ void MainWindow::zap_parameter_to_comment(QString& comment) {
 
 bool MainWindow::zap_parameter_from_comment(const QString& comment) {
     QStringList list = comment.split(QRegExp("(;\\s)(\\s)*"), QString::SkipEmptyParts);
-    if (list.size() != 10) {
+    if (list.size() != 11) {
         error_message("zap_parameter_from_comment", QString("Cannot parse comment to Zap: %1").arg(comment));
         return false;
     }
@@ -1752,7 +1773,7 @@ void MainWindow::runNoise() {
 
     } else {// noise repititions
 
-        int seed;
+        int seed = 0;
         if (type == 1) { // random seed
             QTime t = QTime::currentTime();
             qsrand((uint)t.msec());
@@ -1979,6 +2000,22 @@ void MainWindow::on_sin_positive_checkBox_clicked()
 }
 
 
+void MainWindow::on_zap_sqr_radioButton_clicked()
+{
+    update();
+}
+
+void MainWindow::on_zap_exp_radioButton_clicked()
+{
+    update();
+}
+
+void MainWindow::on_zap_lin_radioButton_clicked()
+{
+    update();
+}
+
+
 
 void MainWindow::on_noiselist_pushButton_clicked()
 {
@@ -2032,4 +2069,6 @@ void MainWindow::on_test_pushButton_2_clicked()
     createNoise();
     saveData(ui->test_lineEdit->text());
 }
+
+
 

@@ -349,7 +349,7 @@
         </sizepolicy>
        </property>
        <property name="currentIndex">
-        <number>3</number>
+        <number>0</number>
        </property>
        <widget class="QWidget" name="ZapsTab">
         <property name="sizePolicy">
@@ -481,6 +481,30 @@
              <widget class="QPushButton" name="createButton">
               <property name="text">
                <string>Create</string>
+              </property>
+             </widget>
+            </item>
+            <item row="10" column="1">
+             <widget class="QRadioButton" name="zap_lin_radioButton">
+              <property name="text">
+               <string>linear</string>
+              </property>
+              <property name="checked">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item row="11" column="1">
+             <widget class="QRadioButton" name="zap_sqr_radioButton">
+              <property name="text">
+               <string>squared</string>
+              </property>
+             </widget>
+            </item>
+            <item row="12" column="1">
+             <widget class="QRadioButton" name="zap_exp_radioButton">
+              <property name="text">
+               <string>exponential</string>
               </property>
              </widget>
             </item>
@@ -1132,7 +1156,7 @@
      <item>
       <widget class="QTabWidget" name="hekaTabWidget">
        <property name="currentIndex">
-        <number>1</number>
+        <number>4</number>
        </property>
        <widget class="QWidget" name="hekaManual">
         <attribute name="title">

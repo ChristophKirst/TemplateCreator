@@ -41,6 +41,19 @@ bool create_zap(DataTYPE dur, DataTYPE samp,
                             DataTYPE f0, DataTYPE f1, DataTYPE amp, bool reverse,
                             DataVECTOR& v );
 
+/*! create a zap stimulus of duration \param dur [sec] assuming a sampling frequency of \param samp [kHz]
+ * starting from freq \param f0 to \param f1 [Hz] increasing quadratically with amplitude \param amp
+ */
+bool create_zap_2(DataTYPE dur, DataTYPE samp,
+                            DataTYPE f0, DataTYPE f1, DataTYPE amp, bool reverse,
+                            DataVECTOR& v );
+
+/*! create a zap stimulus of duration \param dur [sec] assuming a sampling frequency of \param samp [kHz]
+ * starting from freq \param f0 to \param f1 [Hz] increasing exponentially with amplitude \param amp
+ */
+bool create_zap_exp(DataTYPE dur, DataTYPE samp,
+                            DataTYPE f0, DataTYPE f1, DataTYPE amp, bool reverse,
+                            DataVECTOR& v );
 
 /*! create a noise stimulus of duration \param dur [sec] assuming a sampling frequency of \param samp [kHz]
  * with uniform frequency spectrum from \param f0 to \param f1 [Hz] and standard deviation \param sigma
