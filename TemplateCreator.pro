@@ -45,8 +45,8 @@ win32:DEPENDPATH += C:/Programing/gsl-1.8/include
 win32:INCLUDEPATH += C:/Programing/gsl-1.8/include
 win32:LIBS += -LC:/Programing/gsl-1.8/lib
 win32:LIBS += -LC:/Programing/gsl-1.8/bin
-win32:LIBS += -llibgsl -llibgslcblas
-win32:LIBS += -lgsl -lgslcblas
+#win32:LIBS += -llibgsl -llibgslcblas
+#win32:LIBS += -lgsl -lgslcblas
 
 
 #win32:DEPENDPATH += C:/Programing/gsl-1.15
