@@ -43,7 +43,7 @@ void postprocess_template(DataTYPE samp, DataTYPE off, DataTYPE left, DataTYPE r
     }
 
     //add left and right margins
-    if (left<= 0 && right <= 0) return;
+    if (left<= 0.0 && right <= 0.0) return;
 
     //resize:
     int nl = int(left / dt);
